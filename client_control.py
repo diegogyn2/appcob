@@ -159,3 +159,7 @@ class ClientControl:
         devedor_encontrado["parcelas"] = parcelas_atualizadas
         if self.atualizar_gist(dados):
             print(f"✅ Parcela de '{vencimento_parcela}' deletada com sucesso.")
+
+
+def toggle_menu():
+    st.session_state.menu_visivel = not st.session_state.menu_visivel
