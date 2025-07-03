@@ -5,3 +5,4 @@ streamlit_navigation_bar
 pages
 streamlit_community_navigation_bar
 streamlit-js-eval
+plotly
