@@ -95,14 +95,31 @@ else:
                     if not dados:
                         st.info("Nenhum dado disponível. Cadastre um novo devedor para começar.")
                     else:
-                        # Seção de Edição da Tabela (código que você já tem)
-                        df_original = pd.json_normalize(dados, record_path='parcelas', meta=['nome'], errors='ignore')
-                        df_original['valor'] = df_original['valor'].astype(float)
-                        df_original['vencimento'] = pd.to_datetime(df_original['vencimento']).dt.date
+                        df_geral = pd.json_normalize(dados, record_path='parcelas', meta=['nome'], errors='ignore')
+                        df_geral['valor'] = df_geral['valor'].astype(float)
+                        df_geral['vencimento'] = pd.to_datetime(df_geral['vencimento']).dt.date
 
-                        st.write("#### Editar Parcelas Existentes")
+                        # PASSO 1: CRIAR O WIDGET DE FILTRO
+                        st.write("#### Filtrar Devedor")
+                        nomes_devedores = sorted(df_geral['nome'].unique())
+                        opcoes_filtro = ["Todos"] + nomes_devedores
+                        
+                        devedor_filtrado = st.selectbox(
+                            "Selecione um devedor para ver apenas suas parcelas:",
+                            options=opcoes_filtro
+                        )
+                        st.markdown("---")
+
+                        # PASSO 2: APLICAR O FILTRO NO DATAFRAME
+                        # Este é o DataFrame que será mostrado e usado para comparação
+                        df_para_mostrar = df_geral.copy()
+                        if devedor_filtrado != "Todos":
+                            df_para_mostrar = df_geral[df_geral['nome'] == devedor_filtrado]
+
+                        
+                        st.write("#### Parcelas")
                         df_editado = st.data_editor(
-                            df_original.copy(),
+                            df_para_mostrar.copy(), # Usamos o dataframe já filtrado
                             use_container_width=True,
                             disabled=["nome"],
                             column_config={
@@ -115,9 +132,10 @@ else:
                         )
 
                         if st.button("💾 Salvar Alterações na Tabela"):
+                            # A lógica de salvamento agora compara o dataframe filtrado com sua versão editada
                             dados_atualizados = controle.consultar_dados()
-                            for index in df_original.index:
-                                row_original = df_original.loc[index]
+                            for index in df_para_mostrar.index: # Itera sobre o DF filtrado
+                                row_original = df_para_mostrar.loc[index]
                                 row_editada = df_editado.loc[index]
                                 if not row_original.equals(row_editada):
                                     for devedor in dados_atualizados:
@@ -142,7 +160,6 @@ else:
                         # Coluna para Adicionar Parcela
                         with col1:
                             with st.expander("➕ Adicionar Nova Parcela"):
-                                nomes_devedores = sorted([d['nome'] for d in dados])
                                 devedor_selecionado_add = st.selectbox("Selecione o Devedor", options=nomes_devedores, key="add_devedor")
                                 
                                 novo_valor = st.number_input("Valor da Parcela (R$)", min_value=0.01, format="%.2f", key="add_valor")
@@ -150,6 +167,7 @@ else:
 
                                 if st.button("Adicionar Parcela"):
                                     if devedor_selecionado_add and novo_valor:
+                                        # A classe ClientControl não precisa ser alterada, ela já lida com isso
                                         if controle.adicionar_parcela(devedor_selecionado_add, novo_valor, novo_vencimento.strftime("%Y-%m-%d")):
                                             st.success(f"Parcela adicionada com sucesso para {devedor_selecionado_add}!")
                                             st.rerun()
@@ -159,10 +177,8 @@ else:
                         # Coluna para Deletar Parcela
                         with col2:
                             with st.expander("❌ Deletar Parcela Existente"):
-                                nomes_devedores_del = sorted([d['nome'] for d in dados])
-                                devedor_selecionado_del = st.selectbox("Selecione o Devedor", options=nomes_devedores_del, key="del_devedor")
+                                devedor_selecionado_del = st.selectbox("Selecione o Devedor", options=nomes_devedores, key="del_devedor")
 
-                                # Filtra as parcelas baseado no devedor selecionado
                                 if devedor_selecionado_del:
                                     parcelas_do_devedor = []
                                     for devedor in dados:
@@ -170,7 +186,6 @@ else:
                                             parcelas_do_devedor = devedor['parcelas']
                                             break
                                     
-                                    # Opções para o selectbox de parcelas
                                     opcoes_parcelas = [f"R$ {p['valor']:.2f} - Venc: {datetime.strptime(p['vencimento'], '%Y-%m-%d').strftime('%d/%m/%Y')}" for p in parcelas_do_devedor]
                                     
                                     if not opcoes_parcelas:
@@ -179,7 +194,6 @@ else:
                                         parcela_selecionada_str = st.selectbox("Selecione a Parcela para Deletar", options=opcoes_parcelas)
                                         
                                         if st.button("Confirmar Exclusão", type="primary"):
-                                            # Extrai a data de vencimento da string selecionada para usar como chave
                                             vencimento_para_deletar_str = parcela_selecionada_str.split('Venc: ')[1]
                                             vencimento_para_deletar_dt = datetime.strptime(vencimento_para_deletar_str, '%d/%m/%Y')
                                             vencimento_final_str = vencimento_para_deletar_dt.strftime('%Y-%m-%d')
