@@ -1,46 +1,16 @@
-import sys
 import pandas as pd
 import streamlit as st
-from streamlit_community_navigation_bar import st_navbar
-from client_control import ClientControl, toggle_menu
 from streamlit_option_menu import option_menu
-import altair as alt
+import requests
+import json
+from typing import Union, List, Dict
+from datetime import datetime, timedelta
+from client_control import ClientControl, toggle_menu
 
 GIST_ID_FIXO = "68bb78ccf423bb9f3b3af43bc569e3ba"
 st.set_page_config(page_title="ClientControl", layout="wide")
-st.title("📱 Bem-vindo ao Assistente de Cobrança Lulu 💸")
 
-# Estilo da navbar (com padding menor)
-custom_styles = {
-    "nav": {
-        "background-color": "#121212",
-        "padding": "5px 10px",
-        "border-radius": "10px",
-        "box-shadow": "0 2px 6px rgba(0, 0, 0, 0.2)",
-    },
-    "span": {
-        "color": "#e0e0e0",
-        "font-size": "16px",
-        "padding": "6px 12px",
-        "border-radius": "6px",
-        "margin": "0 6px",
-        "transition": "all 0.2s ease-in-out",
-        "font-weight": "500",
-        "letter-spacing": "0.4px",
-        "font-family": "'Inter', 'Segoe UI', sans-serif"
-    },
-    "hover": {
-        "color": "#ffffff",
-        "background-color": "#2a2a2a",
-        "box-shadow": "inset 0 0 0 1px #444",
-    },
-    "active": {
-        "color": "#ffffff",
-        "background-color": "#0d6efd",
-        "font-weight": "600",
-        "box-shadow": "0 2px 8px rgba(13, 110, 253, 0.3)",
-    }
-}
+st.title("📱 Bem-vindo ao Assistente de Cobrança Lulu 💸")
 
 # Autenticação
 if 'controle' not in st.session_state:
@@ -66,12 +36,12 @@ if st.session_state.controle is None:
 else:
     # A partir daqui, o usuário está logado.
     controle: ClientControl = st.session_state.controle
-    
+
     # --- LÓGICA DO LAYOUT COM MENU RETRÁTIL ---
 
     # Inicializa os estados da sessão para o menu
     if "menu_visivel" not in st.session_state:
-        st.session_state.menu_visivel = False  # Menu começa visível
+        st.session_state.menu_visivel = False  # Menu começa oculto
     if "ultima_pagina" not in st.session_state:
         st.session_state.ultima_pagina = "Home"
 
@@ -82,11 +52,9 @@ else:
 
     # Lógica de exibição do Menu e Conteúdo
     if st.session_state.menu_visivel:
-        # Divide a tela: menu à esquerda, conteúdo à direita
         col_menu, col_conteudo = st.columns([0.2, 0.8])
         
         with col_menu:
-            # Usando option_menu para um menu vertical bonito
             pagina_selecionada = option_menu(
                 menu_title=None,
                 options=["Home", "Consultar", "Cadastrar", "Dashboard", "Sobre"],
@@ -99,61 +67,126 @@ else:
                     "nav-link-selected": {"background-color": "#0d6efd"},
                 }
             )
+
+        # LÓGICA DE RECOLHIMENTO AUTOMÁTICO
+        if pagina_selecionada != st.session_state.ultima_pagina:
+            st.session_state.ultima_pagina = pagina_selecionada
+            st.session_state.menu_visivel = False
+            st.rerun()
+
     else:
-        # Se o menu estiver oculto, o conteúdo ocupa toda a tela
         col_conteudo = st.container()
         pagina_selecionada = st.session_state.ultima_pagina
 
-    # Guarda a última seleção para quando o menu for fechado/reaberto
     st.session_state.ultima_pagina = pagina_selecionada
-
+    
     # --- RENDERIZAÇÃO DO CONTEÚDO DA PÁGINA ---
     with col_conteudo:
         if pagina_selecionada == "Home":
             st.subheader("🏠 Home")
             st.markdown("---")
-            st.info("👈 Use o menu para navegar pelas funcionalidades. Clique no '☰' para ocultá-lo.")
+            st.info("👈 Clique no '☰' para exibir o menu e navegar pelas funcionalidades.")
 
         elif pagina_selecionada == "Consultar":
-            st.subheader("🔍 Consultar e Editar Parcelas")
-            st.markdown("---")
-            dados = controle.consultar_dados()
+                    st.subheader("🔍 Consultar e Gerenciar Parcelas")
+                    st.markdown("---")
+                    dados = controle.consultar_dados()
 
-            if not dados:
-                st.info("Nenhum dado disponível.")
-            else:
-                df = pd.json_normalize(dados, record_path='parcelas', meta=['nome'], errors='ignore')
-                df['valor'] = df['valor'].astype(float)
+                    if not dados:
+                        st.info("Nenhum dado disponível. Cadastre um novo devedor para começar.")
+                    else:
+                        # Seção de Edição da Tabela (código que você já tem)
+                        df_original = pd.json_normalize(dados, record_path='parcelas', meta=['nome'], errors='ignore')
+                        df_original['valor'] = df_original['valor'].astype(float)
+                        df_original['vencimento'] = pd.to_datetime(df_original['vencimento']).dt.date
 
-                df_editado = st.data_editor(
-                    df,
-                    use_container_width=True,
-                    disabled=["nome", "vencimento"],
-                    column_config={
-                        "nome": st.column_config.TextColumn("Nome"),
-                        "valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.01, step=1.0, format="R$ %.2f"),
-                        "paga": st.column_config.CheckboxColumn("Paga"),
-                        "vencimento": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY")
-                    },
-                    key="data_editor_consultar"
-                )
+                        st.write("#### Editar Parcelas Existentes")
+                        df_editado = st.data_editor(
+                            df_original.copy(),
+                            use_container_width=True,
+                            disabled=["nome"],
+                            column_config={
+                                "nome": st.column_config.TextColumn("Nome"),
+                                "valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.01, step=1.0, format="R$ %.2f"),
+                                "paga": st.column_config.CheckboxColumn("Paga"),
+                                "vencimento": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY")
+                            },
+                            key="data_editor_consultar"
+                        )
 
-                if st.button("💾 Salvar Alterações"):
-                    dados_atualizados = controle.consultar_dados()
-                    # Mapeia as alterações de forma mais eficiente
-                    edit_map = {(row["nome"], row["vencimento"]): (row["valor"], row["paga"]) for _, row in df_editado.iterrows()}
-                    
-                    for dev in dados_atualizados:
-                        for parcela in dev["parcelas"]:
-                            key = (dev["nome"], parcela["vencimento"])
-                            if key in edit_map:
-                                parcela["valor"], parcela["paga"] = edit_map[key]
-                                parcela["valor"] = float(parcela["valor"])
-                                parcela["paga"] = bool(parcela["paga"])
+                        if st.button("💾 Salvar Alterações na Tabela"):
+                            dados_atualizados = controle.consultar_dados()
+                            for index in df_original.index:
+                                row_original = df_original.loc[index]
+                                row_editada = df_editado.loc[index]
+                                if not row_original.equals(row_editada):
+                                    for devedor in dados_atualizados:
+                                        if devedor['nome'] == row_original['nome']:
+                                            for parcela in devedor['parcelas']:
+                                                if parcela['vencimento'] == row_original['vencimento'].strftime('%Y-%m-%d'):
+                                                    parcela['valor'] = float(row_editada['valor'])
+                                                    parcela['paga'] = bool(row_editada['paga'])
+                                                    vencimento_editado_dt = pd.to_datetime(row_editada['vencimento']).date()
+                                                    parcela['vencimento'] = vencimento_editado_dt.strftime('%Y-%m-%d')
+                                                    break
+                                            break
+                            if controle.atualizar_gist(dados_atualizados):
+                                st.success("✅ Alterações salvas com sucesso!")
+                                st.rerun()
+                        
+                        st.markdown("---")
+
+                        # --- SEÇÃO PARA ADICIONAR E DELETAR PARCELAS ---
+                        col1, col2 = st.columns(2)
+
+                        # Coluna para Adicionar Parcela
+                        with col1:
+                            with st.expander("➕ Adicionar Nova Parcela"):
+                                nomes_devedores = sorted([d['nome'] for d in dados])
+                                devedor_selecionado_add = st.selectbox("Selecione o Devedor", options=nomes_devedores, key="add_devedor")
                                 
-                    if controle.atualizar_gist(dados_atualizados):
-                        st.success("✅ Alterações salvas com sucesso!")
-                        st.rerun()
+                                novo_valor = st.number_input("Valor da Parcela (R$)", min_value=0.01, format="%.2f", key="add_valor")
+                                novo_vencimento = st.date_input("Data de Vencimento", key="add_vencimento")
+
+                                if st.button("Adicionar Parcela"):
+                                    if devedor_selecionado_add and novo_valor:
+                                        if controle.adicionar_parcela(devedor_selecionado_add, novo_valor, novo_vencimento.strftime("%Y-%m-%d")):
+                                            st.success(f"Parcela adicionada com sucesso para {devedor_selecionado_add}!")
+                                            st.rerun()
+                                    else:
+                                        st.warning("Por favor, preencha todos os campos.")
+
+                        # Coluna para Deletar Parcela
+                        with col2:
+                            with st.expander("❌ Deletar Parcela Existente"):
+                                nomes_devedores_del = sorted([d['nome'] for d in dados])
+                                devedor_selecionado_del = st.selectbox("Selecione o Devedor", options=nomes_devedores_del, key="del_devedor")
+
+                                # Filtra as parcelas baseado no devedor selecionado
+                                if devedor_selecionado_del:
+                                    parcelas_do_devedor = []
+                                    for devedor in dados:
+                                        if devedor['nome'] == devedor_selecionado_del:
+                                            parcelas_do_devedor = devedor['parcelas']
+                                            break
+                                    
+                                    # Opções para o selectbox de parcelas
+                                    opcoes_parcelas = [f"R$ {p['valor']:.2f} - Venc: {datetime.strptime(p['vencimento'], '%Y-%m-%d').strftime('%d/%m/%Y')}" for p in parcelas_do_devedor]
+                                    
+                                    if not opcoes_parcelas:
+                                        st.info("Este devedor não possui parcelas.")
+                                    else:
+                                        parcela_selecionada_str = st.selectbox("Selecione a Parcela para Deletar", options=opcoes_parcelas)
+                                        
+                                        if st.button("Confirmar Exclusão", type="primary"):
+                                            # Extrai a data de vencimento da string selecionada para usar como chave
+                                            vencimento_para_deletar_str = parcela_selecionada_str.split('Venc: ')[1]
+                                            vencimento_para_deletar_dt = datetime.strptime(vencimento_para_deletar_str, '%d/%m/%Y')
+                                            vencimento_final_str = vencimento_para_deletar_dt.strftime('%Y-%m-%d')
+                                            
+                                            if controle.deletar_parcela(devedor_selecionado_del, vencimento_final_str):
+                                                st.success("Parcela deletada com sucesso!")
+                                                st.rerun()
 
         elif pagina_selecionada == "Cadastrar":
             st.subheader("📝 Cadastrar Novo Devedor")
@@ -210,7 +243,7 @@ else:
                     if ano_selecionado != "Todos":
                         df_filtrado = df_filtrado[df_filtrado['ano'] == ano_selecionado]
                     if mes_selecionado != "Todos":
-                        mes_numero = opcoes_mes.index(mes_selecionado)
+                        mes_numero = opcoes_mes.index(mes_selecionado) + 1 # Meses são 1-12
                         df_filtrado = df_filtrado[df_filtrado['mes_num'] == mes_numero]
 
                     st.markdown("---")
@@ -244,7 +277,6 @@ else:
                             st.dataframe(styled_table, use_container_width=True)
                         else:
                             st.info("Nenhum dado de valor para exibir na tabela de resumo mensal.")
-
 
         elif pagina_selecionada == "Sobre":
             st.subheader("ℹ️ Sobre o Projeto")
