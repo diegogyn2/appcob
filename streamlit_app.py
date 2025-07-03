@@ -4,9 +4,12 @@ import streamlit as st
 from streamlit_community_navigation_bar import st_navbar
 from client_control import ClientControl
 import altair as alt
+from streamlit_js_eval import streamlit_js_eval 
 
 GIST_ID_FIXO = "68bb78ccf423bb9f3b3af43bc569e3ba"
-st.set_page_config(page_title="ClientControl", layout="centered")
+
+# Usar layout "wide" para melhor aproveitamento da tela em todos os dispositivos
+st.set_page_config(page_title="ClientControl", layout="wide")
 st.title("Bem-vindo ao Assistente de Cobrança Lulu 💸")
 
 # Estilo da navbar
@@ -134,17 +137,16 @@ else:
                 )
                 st.success(f"✅ Devedor '{nome}' cadastrado com sucesso!")
 
-    # Página: DASHBOARD (com Tabela Dinâmica e Filtros)
+    # Página: DASHBOARD (com Tabela Dinâmica e Filtros Responsivos)
     elif pagina == "Dashboard":
         st.subheader("📊 Dashboard de Cobranças")
 
         dados = controle.consultar_dados()
         if not dados:
             st.info("Nenhum dado para exibir no dashboard.")
-            st.stop() # Para a execução se não houver dados
+            st.stop() 
 
-        # ---------------- ETAPA 1: PREPARAÇÃO DOS DADOS ----------------
-        # Normaliza e prepara o DataFrame principal uma única vez
+        # ETAPA 1: PREPARAÇÃO DOS DADOS
         df = pd.json_normalize(
             dados,
             record_path="parcelas",
@@ -154,83 +156,76 @@ else:
         df["valor"] = pd.to_numeric(df["valor"], errors='coerce').fillna(0)
         df["paga"] = df["paga"].astype(bool)
         df["vencimento"] = pd.to_datetime(df["vencimento"])
-        
-        # Cria colunas auxiliares que serão usadas nos filtros e na tabela
         df['ano'] = df['vencimento'].dt.year
         df['mes_num'] = df['vencimento'].dt.month
         df['status'] = df['paga'].map({True: 'Valor Pago', False: 'Valor a Receber'})
 
-        # ---------------- ETAPA 2: FILTROS INTERATIVOS ----------------
+        # ETAPA 2: LÓGICA RESPONSIVA E FILTROS
+        screen_width = streamlit_js_eval(js_expressions='window.innerWidth', key='SCR_WIDTH')
+        IS_MOBILE = (screen_width < 768) if screen_width is not None else False
+
         st.markdown("### Filtros")
         
-        # Opções para os filtros
         anos_disponiveis = sorted(df['ano'].unique(), reverse=True)
         opcoes_ano = ["Todos"] + anos_disponiveis
-        
         meses_nomes = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
                        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
         opcoes_mes = ["Todos"] + meses_nomes
 
-        col1, col2 = st.columns(2)
-        with col1:
+        if IS_MOBILE:
             ano_selecionado = st.selectbox("Selecione o Ano", options=opcoes_ano)
-        with col2:
             mes_selecionado = st.selectbox("Selecione o Mês", options=opcoes_mes)
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                ano_selecionado = st.selectbox("Selecione o Ano", options=opcoes_ano)
+            with col2:
+                mes_selecionado = st.selectbox("Selecione o Mês", options=opcoes_mes)
 
-        # Aplica os filtros ao DataFrame
         df_filtrado = df.copy()
         if ano_selecionado != "Todos":
             df_filtrado = df_filtrado[df_filtrado['ano'] == ano_selecionado]
-        
         if mes_selecionado != "Todos":
-            # Converte o nome do mês para número para poder filtrar
             mes_numero = opcoes_mes.index(mes_selecionado)
             df_filtrado = df_filtrado[df_filtrado['mes_num'] == mes_numero]
 
         st.markdown("---")
-
-        # ---------------- ETAPA 3: EXIBIÇÃO DOS DADOS FILTRADOS ----------------
         
+        # ETAPA 3: EXIBIÇÃO DOS DADOS FILTRADOS
         if df_filtrado.empty:
             st.warning("Nenhum dado encontrado para a seleção de filtro atual.")
         else:
             st.markdown("### Resumo Financeiro")
-            # Métricas calculadas com base nos dados JÁ FILTRADOS
             total_pago = df_filtrado[df_filtrado["paga"]]["valor"].sum()
             total_aberto = df_filtrado[~df_filtrado["paga"]]["valor"].sum()
             valor_total = total_pago + total_aberto
             
-            m1, m2, m3 = st.columns(3)
-            m1.metric("💰 Total Recebido", f"R$ {total_pago:,.2f}")
-            m2.metric("📬 Total a Receber", f"R$ {total_aberto:,.2f}")
-            m3.metric("📋 Total Geral", f"R$ {valor_total:,.2f}")
+            if IS_MOBILE:
+                st.metric("💰 Total Recebido", f"R$ {total_pago:,.2f}")
+                st.metric("📬 Total a Receber", f"R$ {total_aberto:,.2f}")
+                st.metric("📋 Total Geral", f"R$ {valor_total:,.2f}")
+            else:
+                m1, m2, m3 = st.columns(3)
+                m1.metric("💰 Total Recebido", f"R$ {total_pago:,.2f}")
+                m2.metric("📬 Total a Receber", f"R$ {total_aberto:,.2f}")
+                m3.metric("📋 Total Geral", f"R$ {valor_total:,.2f}")
 
             st.markdown("---")
             st.markdown("### Detalhamento Mensal")
 
-            # Cria uma coluna de mês com nome para a tabela
             df_filtrado['mes_nome'] = df_filtrado['mes_num'].apply(lambda x: meses_nomes[x-1])
-            
-            # Cria a tabela dinâmica (pivot table)
             tabela_resumo = pd.pivot_table(
-                df_filtrado,
-                values='valor',
-                index='status',          # Linhas da tabela
-                columns='mes_nome',      # Colunas da tabela
-                aggfunc='sum',           # O que fazer com os valores: somar
-                fill_value=0,            # Preencher células vazias com 0
+                df_filtrado, values='valor', index='status', columns='mes_nome',
+                aggfunc='sum', fill_value=0,
             )
 
-            # Ordena as colunas da tabela na ordem correta dos meses
-            ordem_meses = [mes for mes in meses_nomes if mes in tabela_resumo.columns]
-            tabela_resumo = tabela_resumo[ordem_meses]
+            if not tabela_resumo.empty:
+                ordem_meses = [mes for mes in meses_nomes if mes in tabela_resumo.columns]
+                tabela_resumo = tabela_resumo[ordem_meses]
+                styled_table = tabela_resumo.style.format("R$ {:,.2f}")
+                st.dataframe(styled_table, use_container_width=True)
 
-            # Formata os valores como moeda para exibição
-            styled_table = tabela_resumo.style.format("R$ {:,.2f}")
-
-            st.dataframe(styled_table, use_container_width=True)
-
-
+    # Página: SOBRE
     elif pagina == "Sobre":
         st.subheader("ℹ️ Sobre o Projeto")
         st.markdown("""
