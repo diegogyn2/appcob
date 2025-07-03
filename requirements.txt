@@ -3,3 +3,4 @@ streamlit-option-menu
 dotenv
 streamlit_navigation_bar
 pages
+streamlit_community_navigation_bar
